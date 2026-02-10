@@ -1,0 +1,39 @@
+# Backend
+backend/bootstrap
+backend/deployment.zip
+backend/*.exe
+backend/*.dll
+backend/*.so
+backend/*.dylib
+backend/lambda.exe~
+
+# Build artifacts
+build/
+.aws-sam/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Environment
+.env
+.env.local
+/.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Agent/Claude
+.claude/

@@ -1,0 +1,12 @@
+# SAM CLI configuration for StreamMaxing v3
+# Run: sam deploy (after running deploy.ps1 or building manually)
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "streammaxing"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+# Parameter overrides are passed by deploy.ps1 script

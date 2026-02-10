@@ -1,0 +1,850 @@
+/* StreamMaxing v3 - Global Styles (Discord-inspired dark theme) */
+
+:root {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-tertiary: #0f3460;
+  --bg-card: #1e2a4a;
+  --bg-card-hover: #243356;
+  --bg-input: #0d1b2a;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0b8;
+  --text-muted: #6b6b80;
+  --accent-primary: #7289da;
+  --accent-primary-hover: #5b73c7;
+  --accent-twitch: #9146ff;
+  --accent-discord: #5865f2;
+  --accent-success: #43b581;
+  --accent-danger: #f04747;
+  --accent-warning: #faa61a;
+  --border-color: #2a2a4a;
+  --border-radius: 8px;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--border-radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+}
+
+.btn-danger {
+  background: var(--accent-danger);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #d63b3b;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error Message */
+.error-message {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--accent-danger);
+}
+
+.error-message p {
+  margin-bottom: 16px;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px dashed var(--border-color);
+}
+
+/* Section Subtitle */
+.section-subtitle {
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+/* Login Page */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, #0a1628 100%);
+}
+
+.login-container {
+  text-align: center;
+  padding: 48px;
+  background: var(--bg-card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  max-width: 440px;
+  width: 100%;
+  margin: 20px;
+}
+
+.login-logo {
+  color: var(--accent-twitch);
+  margin-bottom: 16px;
+}
+
+.login-container h1 {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, var(--accent-twitch), var(--accent-discord));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.login-subtitle {
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.discord-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  background: var(--accent-discord);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  justify-content: center;
+}
+
+.discord-button:hover {
+  background: #4752c4;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(88, 101, 242, 0.4);
+}
+
+.login-features {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+}
+
+.feature {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.feature-icon {
+  font-size: 20px;
+}
+
+/* Dashboard Layout */
+.dashboard-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 56px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-logo {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary) !important;
+  text-decoration: none !important;
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.nav-link {
+  color: var(--text-secondary) !important;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+  text-decoration: none !important;
+}
+
+.nav-link:hover {
+  color: var(--text-primary) !important;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-name {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.dashboard-content {
+  flex: 1;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Page Header */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.page-header h2 {
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.back-link {
+  font-size: 13px;
+  color: var(--text-secondary) !important;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+
+/* Guild Selector */
+.guild-selector h2 {
+  font-size: 24px;
+  margin-bottom: 4px;
+}
+
+.guild-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.guild-card {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-color);
+}
+
+.guild-card:hover {
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+.guild-icon {
+  margin-bottom: 12px;
+}
+
+.guild-icon img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+}
+
+.guild-icon-placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 auto;
+}
+
+.guild-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Streamer List */
+.streamer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.streamer-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+.streamer-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.streamer-info {
+  flex: 1;
+}
+
+.streamer-info h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.streamer-link {
+  font-size: 13px;
+  color: var(--accent-twitch) !important;
+}
+
+/* Config Section */
+.config-section {
+  padding: 24px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+.config-section h3 {
+  margin-bottom: 4px;
+}
+
+/* Config Editor */
+.config-form {
+  max-width: 600px;
+}
+
+.form-group {
+  margin-bottom: 24px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.form-group select,
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group select:focus,
+.form-group input[type="text"]:focus {
+  border-color: var(--accent-primary);
+}
+
+.form-group-checkbox label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.form-group-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+}
+
+.form-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  margin-left: 26px;
+}
+
+.form-actions {
+  margin-top: 32px;
+}
+
+/* User Settings */
+.user-settings h2 {
+  margin-bottom: 4px;
+}
+
+.preferences-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preference-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+.preference-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preference-guild {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.preference-streamer {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .dashboard-header {
+    padding: 0 16px;
+  }
+
+  .dashboard-content {
+    padding: 20px 16px;
+  }
+
+  .guild-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+
+  .login-container {
+    padding: 32px 24px;
+  }
+
+  .login-features {
+    gap: 16px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .header-nav {
+    gap: 12px;
+  }
+
+  .user-name {
+    display: none;
+  }
+}
+
+/* Bot Install Section */
+.bot-install-section {
+  margin-bottom: 24px;
+}
+
+.bot-install-card {
+  background: #2f3136;
+  border: 1px solid #40444b;
+  border-radius: 8px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bot-install-info h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.bot-install-info p {
+  margin: 0;
+  color: #b9bbbe;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.bot-install-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .bot-install-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* Invite Page */
+.invite-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.invite-card {
+  background: #2f3136;
+  border-radius: 12px;
+  padding: 40px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.invite-guild-info {
+  margin-bottom: 32px;
+}
+
+.invite-guild-icon img {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  margin-bottom: 16px;
+}
+
+.guild-icon-placeholder.large {
+  width: 80px;
+  height: 80px;
+  font-size: 2rem;
+  margin: 0 auto 16px;
+}
+
+.invite-guild-info h2 {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: 1.5rem;
+}
+
+.invite-subtitle {
+  color: #b9bbbe;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.invite-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.invite-step {
+  color: #b9bbbe;
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+
+.invite-success p {
+  color: #43b581;
+  font-weight: 600;
+  margin: 0;
+}
+
+.invite-error h2 {
+  margin: 0 0 8px;
+  color: #f04747;
+}
+
+.invite-error p {
+  color: #b9bbbe;
+  margin: 0;
+}
+
+.btn-discord {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-discord:hover {
+  background: #4752c4;
+}
+
+.btn-twitch {
+  background: #9146ff;
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-twitch:hover {
+  background: #7d2ee6;
+}
+
+/* Invite Management (admin) */
+.invite-management {
+  margin-top: 24px;
+  background: #2f3136;
+  border: 1px solid #40444b;
+  border-radius: 8px;
+  padding: 20px 24px;
+}
+
+.invite-management h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.invite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.invite-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #36393f;
+  border-radius: 6px;
+  padding: 10px 14px;
+  gap: 12px;
+}
+
+.invite-item-code {
+  font-family: monospace;
+  color: #7289da;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invite-item-meta {
+  color: #72767d;
+  font-size: 0.8rem;
+}
+
+/* Streamer Message Editor */
+.message-editor {
+  margin-top: 24px;
+  background: #2f3136;
+  border: 1px solid #40444b;
+  border-radius: 8px;
+  padding: 20px 24px;
+}
+
+.message-editor h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.message-editor textarea {
+  width: 100%;
+  min-height: 100px;
+  background: #40444b;
+  border: 1px solid #4f545c;
+  border-radius: 6px;
+  color: #dcddde;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.message-editor textarea:focus {
+  outline: none;
+  border-color: #5865f2;
+}
+
+.message-editor-help {
+  color: #72767d;
+  font-size: 0.8rem;
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.message-editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Admin badge on guild cards */
+.guild-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.guild-badge.admin {
+  background: rgba(88, 101, 242, 0.2);
+  color: #5865f2;
+}
+
+.guild-badge.member {
+  background: rgba(67, 181, 129, 0.2);
+  color: #43b581;
+}

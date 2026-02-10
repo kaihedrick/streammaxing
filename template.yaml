@@ -1,0 +1,239 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  StreamMaxing v3 – Twitch → Discord notification system.
+  Deploys Lambda (backend), HTTP API, S3 (frontend), and CloudFront (CDN + reverse proxy).
+
+# ─────────────────────────────────────────────
+# Parameters (secrets passed at deploy time)
+# ─────────────────────────────────────────────
+Parameters:
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: Neon Postgres connection string
+  DiscordClientId:
+    Type: String
+  DiscordClientSecret:
+    Type: String
+    NoEcho: true
+  DiscordApplicationId:
+    Type: String
+  DiscordPublicKey:
+    Type: String
+  DiscordBotToken:
+    Type: String
+    NoEcho: true
+  TwitchClientId:
+    Type: String
+  TwitchClientSecret:
+    Type: String
+    NoEcho: true
+  TwitchWebhookSecret:
+    Type: String
+    NoEcho: true
+  JwtSecret:
+    Type: String
+    NoEcho: true
+  SiteUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Full CloudFront URL (e.g. https://d1abc23def.cloudfront.net).
+      Leave blank on first deploy; the deploy script sets it automatically
+      after the CloudFront distribution is created.
+
+# ─────────────────────────────────────────────
+# Resources
+# ─────────────────────────────────────────────
+Resources:
+
+  # ========================
+  # Backend – Lambda + HTTP API
+  # ========================
+
+  StreamMaxingApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      # No CORS config here – our Go middleware handles CORS
+
+  StreamMaxingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: streammaxing
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+      CodeUri: build/lambda/
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          DATABASE_URL: !Ref DatabaseUrl
+          DISCORD_CLIENT_ID: !Ref DiscordClientId
+          DISCORD_CLIENT_SECRET: !Ref DiscordClientSecret
+          DISCORD_APPLICATION_ID: !Ref DiscordApplicationId
+          DISCORD_PUBLIC_KEY: !Ref DiscordPublicKey
+          DISCORD_BOT_TOKEN: !Ref DiscordBotToken
+          TWITCH_CLIENT_ID: !Ref TwitchClientId
+          TWITCH_CLIENT_SECRET: !Ref TwitchClientSecret
+          TWITCH_WEBHOOK_SECRET: !Ref TwitchWebhookSecret
+          JWT_SECRET: !Ref JwtSecret
+          ENVIRONMENT: production
+          LOG_LEVEL: info
+          # SiteUrl is the CloudFront URL (set after first deploy via deploy script)
+          API_BASE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref SiteUrl
+          DISCORD_REDIRECT_URI: !Sub "${SiteUrl}/api/auth/discord/callback"
+      Events:
+        ApiCatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref StreamMaxingApi
+            Path: /{proxy+}
+            Method: ANY
+
+  # ========================
+  # Frontend – S3 bucket
+  # ========================
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # ========================
+  # CloudFront CDN + Reverse Proxy
+  # ========================
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "StreamMaxing-OAC-${AWS::StackName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: StreamMaxing v3
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        HttpVersion: http2and3
+
+        # --- Custom Domain ---
+        Aliases:
+          - streammaxing.live
+        ViewerCertificate:
+          AcmCertificateArn: arn:aws:acm:us-east-1:783764580656:certificate/518dca32-33d0-4fa7-9450-631c92bae1e3
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+        # --- Origins ---
+        Origins:
+          # 1) Frontend static files from S3
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+
+          # 2) Backend API via API Gateway HTTP API
+          - Id: ApiOrigin
+            DomainName: !Sub "${StreamMaxingApi}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+
+        # --- Cache Behaviors ---
+        DefaultCacheBehavior:
+          # Default → S3 (frontend)
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed: CachingOptimized
+          Compress: true
+
+        CacheBehaviors:
+          # /api/* → API Gateway (no caching, forward all)
+          - PathPattern: "/api/*"
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed: CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed: AllViewerExceptHostHeader
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            Compress: true
+
+          # /webhooks/* → API Gateway (no caching, forward all)
+          - PathPattern: "/webhooks/*"
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed: CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed: AllViewerExceptHostHeader
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            Compress: true
+
+        # --- SPA Routing (404/403 → index.html) ---
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+# ─────────────────────────────────────────────
+# Outputs
+# ─────────────────────────────────────────────
+Outputs:
+  CloudFrontUrl:
+    Description: CloudFront distribution URL (use this for testing before custom domain)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID (needed for cache invalidation)
+    Value: !Ref CloudFrontDistribution
+  FrontendBucketName:
+    Description: S3 bucket name for frontend deployment
+    Value: !Ref FrontendBucket
+  ApiGatewayUrl:
+    Description: Direct API Gateway URL (CloudFront proxies to this)
+    Value: !Sub "https://${StreamMaxingApi}.execute-api.${AWS::Region}.amazonaws.com"
+  LambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref StreamMaxingFunction
