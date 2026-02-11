@@ -26,8 +26,49 @@ async function fetchAPI<T>(path: string, options: RequestInit = {}): Promise<T> 
 }
 
 // Auth
+
+/**
+ * Initiates the Discord OAuth flow from the frontend.
+ *
+ * Instead of redirecting to the backend (which sets a cookie for CSRF state),
+ * the frontend generates the state, stores it in localStorage, and redirects
+ * directly to Discord. This avoids the cookie-based state verification that
+ * fails in privacy-focused browsers (Brave, etc.) which block cookies on
+ * cross-site redirects.
+ */
 export function loginWithDiscord() {
-  window.location.href = `${API_BASE}/api/auth/discord/login`;
+  const clientId = import.meta.env.VITE_DISCORD_CLIENT_ID;
+  if (!clientId) {
+    console.error('VITE_DISCORD_CLIENT_ID is not configured');
+    return;
+  }
+
+  // Generate random state for CSRF protection and store in localStorage
+  const state = crypto.randomUUID().replace(/-/g, '');
+  localStorage.setItem('oauth_state', state);
+
+  const redirectUri = `${window.location.origin}/auth/callback`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'identify guilds',
+    state,
+  });
+
+  window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
+/**
+ * Exchange a Discord authorization code for a session.
+ * The backend exchanges the code with Discord, creates/updates the user,
+ * sets the session cookie, and returns user info.
+ */
+export async function exchangeDiscordCode(code: string, redirectUri: string): Promise<User> {
+  return fetchAPI('/api/auth/discord/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
+  });
 }
 
 export async function logout(): Promise<{ message: string }> {

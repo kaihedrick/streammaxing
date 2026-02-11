@@ -232,6 +232,7 @@ if (-not $BackendOnly) {
 
     # Build with production env (VITE_API_URL empty = same origin via CloudFront)
     $env:VITE_API_URL = ""
+    $env:VITE_DISCORD_CLIENT_ID = $envVars['DISCORD_CLIENT_ID']
     npm run build
 
     if ($LASTEXITCODE -ne 0) {

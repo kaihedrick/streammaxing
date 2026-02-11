@@ -33,7 +33,7 @@ func (s *OAuthService) GetAuthURL(state string) string {
 		"scope":         {"identify guilds"},
 		"state":         {state},
 	}
-	return "https://discord.com/api/oauth2/authorize?" + params.Encode()
+	return "https://discord.com/oauth2/authorize?" + params.Encode()
 }
 
 // TokenResponse represents the Discord OAuth token response
@@ -46,13 +46,21 @@ type TokenResponse struct {
 }
 
 // ExchangeCode exchanges an authorization code for an access token
+// using the configured redirect URI.
 func (s *OAuthService) ExchangeCode(code string) (*TokenResponse, error) {
+	return s.ExchangeCodeWithURI(code, s.RedirectURI)
+}
+
+// ExchangeCodeWithURI exchanges an authorization code for an access token
+// using the provided redirect URI. The redirect_uri must match exactly what was
+// used in the authorize request, or Discord will reject the exchange.
+func (s *OAuthService) ExchangeCodeWithURI(code, redirectURI string) (*TokenResponse, error) {
 	data := url.Values{
 		"client_id":     {s.ClientID},
 		"client_secret": {s.ClientSecret},
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"redirect_uri":  {s.RedirectURI},
+		"redirect_uri":  {redirectURI},
 	}
 
 	resp, err := http.PostForm("https://discord.com/api/oauth2/token", data)

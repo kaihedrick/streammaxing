@@ -224,6 +224,7 @@ func setupRoutes(router *Router, svc *appServices) {
 	// Discord OAuth (no auth required)
 	router.Handle("GET", "/api/auth/discord/login", withRateLimit(authHandler.DiscordLogin))
 	router.Handle("GET", "/api/auth/discord/callback", withRateLimit(authHandler.DiscordCallback))
+	router.Handle("POST", "/api/auth/discord/exchange", withRateLimit(authHandler.DiscordExchange))
 
 	// Twitch OAuth callback (no auth middleware - user_id is embedded in the OAuth state parameter)
 	router.Handle("GET", "/api/auth/twitch/callback", withRateLimit(twitchAuthHandler.TwitchCallback))

@@ -249,6 +249,116 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, handlerFrontendURL+"/dashboard", http.StatusTemporaryRedirect)
 }
 
+// DiscordExchange handles the code→token exchange for the frontend-driven OAuth flow.
+//
+// The frontend stores CSRF state in localStorage (not cookies), redirects to
+// Discord, verifies state client-side on callback, and then POSTs the code here.
+// This avoids the cookie-based state check that breaks in browsers like Brave
+// which block cookies on cross-site redirects.
+func (h *AuthHandler) DiscordExchange(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var body struct {
+		Code        string `json:"code"`
+		RedirectURI string `json:"redirect_uri"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" || body.RedirectURI == "" {
+		http.Error(w, "Missing code or redirect_uri", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange authorization code for access token.
+	// We must use the same redirect_uri that the frontend used in the authorize
+	// request, otherwise Discord rejects the exchange.
+	tokenResp, err := h.oauth.ExchangeCodeWithURI(body.Code, body.RedirectURI)
+	if err != nil {
+		log.Printf("[AUTH_ERROR] Failed to exchange code: %v", err)
+		http.Error(w, "Failed to exchange authorization code", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[AUTH_DEBUG] Token exchange successful (frontend flow), scopes: %s", tokenResp.Scope)
+
+	// From here the logic is identical to DiscordCallback: fetch user/guilds,
+	// upsert DB rows, create JWT, set session cookie.
+
+	user, err := h.oauth.GetUser(tokenResp.AccessToken)
+	if err != nil {
+		log.Printf("[AUTH_ERROR] Failed to fetch user: %v", err)
+		http.Error(w, "Failed to fetch user information", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[AUTH_DEBUG] User fetched: %s (%s)", user.Username, user.ID)
+
+	guilds, err := h.oauth.GetUserGuilds(tokenResp.AccessToken)
+	if err != nil {
+		log.Printf("[AUTH_ERROR] Failed to fetch guilds: %v", err)
+		http.Error(w, "Failed to fetch guilds", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[AUTH_DEBUG] Successfully fetched %d guilds", len(guilds))
+
+	if err := db.CreateOrUpdateUser(ctx, &db.User{
+		UserID:   user.ID,
+		Username: user.Username,
+		Avatar:   user.Avatar,
+	}); err != nil {
+		log.Printf("[AUTH_ERROR] Failed to store user: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	knownGuildIDs, err := db.GetAllGuildIDs(ctx)
+	if err != nil {
+		log.Printf("[AUTH_WARN] Failed to fetch known guild IDs: %v", err)
+		knownGuildIDs = make(map[string]bool)
+	}
+
+	for _, guild := range guilds {
+		isAdmin := guild.Owner || discord.HasAdminPermission(guild.Permissions)
+		if isAdmin {
+			ownerID := ""
+			if guild.Owner {
+				ownerID = user.ID
+			}
+			if err := db.CreateOrUpdateGuild(ctx, &db.Guild{
+				GuildID: guild.ID,
+				Name:    guild.Name,
+				Icon:    guild.Icon,
+				OwnerID: ownerID,
+			}); err != nil {
+				log.Printf("[AUTH_WARN] Failed to store guild %s: %v", guild.ID, err)
+				continue
+			}
+			if err := db.UpsertUserGuild(ctx, user.ID, guild.ID, true); err != nil {
+				log.Printf("[AUTH_WARN] Failed to store membership for guild %s: %v", guild.ID, err)
+			}
+		} else if knownGuildIDs[guild.ID] {
+			if err := db.UpsertUserGuild(ctx, user.ID, guild.ID, false); err != nil {
+				log.Printf("[AUTH_WARN] Failed to store membership for guild %s: %v", guild.ID, err)
+			}
+		}
+	}
+
+	jwtToken, jti, err := h.sessionService.CreateSession(user.ID, user.Username)
+	if err != nil {
+		log.Printf("[AUTH_ERROR] Failed to generate JWT: %v", err)
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		return
+	}
+
+	setSessionCookie(w, jwtToken)
+
+	log.Printf("[AUTH] User %s (%s) logged in via frontend flow (jti: %s)", user.Username, user.ID, jti)
+	h.securityLogger.LogAuthSuccess(ctx, user.ID, r.RemoteAddr)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":       user.ID,
+		"username": user.Username,
+		"avatar":   user.Avatar,
+	})
+}
+
 // Logout clears the session cookie and revokes the session server-side
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

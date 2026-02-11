@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { LoginPage } from './components/Auth/LoginPage';
+import { AuthCallback } from './components/Auth/AuthCallback';
 import { ProtectedRoute } from './components/Auth/ProtectedRoute';
 import { DashboardLayout } from './components/Dashboard/DashboardLayout';
 import { GuildSelector } from './components/Dashboard/GuildSelector';
@@ -14,6 +15,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LoginPage />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/invite/:code" element={<InvitePage />} />
         <Route
           path="/dashboard"
