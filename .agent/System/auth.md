@@ -254,25 +254,35 @@ StreamMaxing uses OAuth 2.0 for both Discord and Twitch authentication. Discord 
 
 ### JWT Token Structure
 
-**Payload**:
+**Payload** (Updated in Task 007):
 ```json
 {
   "user_id": "123456789",
   "username": "ExampleUser",
+  "jti": "unique-session-id-hex",
   "iat": 1609459200,
-  "exp": 1610064000
+  "exp": 1609545600
 }
 ```
 
 **Signing**:
 - Algorithm: HS256 (HMAC with SHA-256)
-- Secret: Environment variable `JWT_SECRET` (min 32 characters)
+- Secret: Loaded from AWS Secrets Manager (not environment variables)
+- Secret cached with 5-minute TTL for performance
+- Secrets rotated every 90 days
 
 **Storage**:
 - HTTP-only cookie (prevents XSS)
-- Secure flag (HTTPS only)
+- Secure flag (HTTPS only in production)
 - SameSite=Strict (CSRF protection)
-- Max-Age: 7 days (604800 seconds)
+- Max-Age: **24 hours** (86400 seconds) - reduced from 7 days for security
+- Domain: Explicitly empty to prevent subdomain access
+
+**Session Revocation** (New in Task 007):
+- Each JWT has unique ID (jti claim)
+- Revoked sessions tracked in `revoked_sessions` table
+- Logout immediately invalidates session
+- Old revoked sessions cleaned up automatically (7-day retention)
 
 ### Token Validation Middleware
 
@@ -287,32 +297,31 @@ StreamMaxing uses OAuth 2.0 for both Discord and Twitch authentication. Discord 
 7. Continue to handler
 ```
 
-**Implementation** (Go):
+**Implementation** (Go) - Updated for Task 007:
 ```go
-func AuthMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// AuthMiddleware uses the SessionService for JWT validation + revocation check.
+// Falls back to legacy JWT parsing for backward compatibility during migration.
+func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
         cookie, err := r.Cookie("session")
         if err != nil {
+            securityLogger.LogAuthFailure(r.Context(), "", r.RemoteAddr, "missing_session_cookie")
             http.Error(w, "Unauthorized", http.StatusUnauthorized)
             return
         }
 
-        token, err := jwt.Parse(cookie.Value, func(token *jwt.Token) (interface{}, error) {
-            return []byte(os.Getenv("JWT_SECRET")), nil
-        })
-
-        if err != nil || !token.Valid {
+        // Validate via SessionService (includes revocation check)
+        claims, err := sessionService.ValidateSession(r.Context(), cookie.Value)
+        if err != nil {
+            securityLogger.LogAuthFailure(r.Context(), "", r.RemoteAddr, err.Error())
             http.Error(w, "Unauthorized", http.StatusUnauthorized)
             return
         }
 
-        claims := token.Claims.(jwt.MapClaims)
-        userID := claims["user_id"].(string)
-
-        // Attach user_id to context
-        ctx := context.WithValue(r.Context(), "user_id", userID)
+        ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
+        ctx = context.WithValue(ctx, JTIKey, claims.JTI)
         next.ServeHTTP(w, r.WithContext(ctx))
-    })
+    }
 }
 ```
 
@@ -327,15 +336,26 @@ func AuthMiddleware(next http.Handler) http.Handler {
 - Add/remove streamers
 - Enable/disable streamer notifications
 
-**Permission Check**:
+**Permission Check** (Enhanced in Task 007):
 ```
 1. User requests action on guild X
-2. Backend fetches user's guilds from Discord API (cached for 5 minutes)
-3. Check if user has guild X in their guilds list
-4. Check if user has ADMINISTRATOR permission (bitwise check)
-5. If yes, allow action
-6. If no, return 403 Forbidden
+2. Check permission cache (TTL: 5 minutes)
+3. If cache miss or expired:
+   a. Fetch user's guilds from Discord API in real-time
+   b. Verify user is in guild X
+   c. Check if user has ADMINISTRATOR permission (bitwise 0x8)
+   d. Cache result with timestamp
+4. If permission denied, log security event
+5. If yes, allow action and add guild_id to request context
+6. If no, return 403 Forbidden with generic error message
 ```
+
+**Security Enhancements**:
+- **Real-time validation**: Permissions re-validated on every request
+- **Short cache TTL**: 5-minute cache balances security and performance
+- **Permission cache invalidation**: Cache cleared on logout
+- **Audit logging**: All permission denials logged with user ID, guild ID, and action
+- **Middleware enforcement**: Authorization enforced at middleware level, not handler level
 
 **Implementation**:
 ```go
@@ -386,12 +406,13 @@ func CheckGuildPermission(userID, guildID string) (bool, error) {
 ### Twitch Token Refresh
 - Twitch access tokens expire after ~4 hours
 - Refresh tokens can be used indefinitely
-- **Implementation**:
+- **Implementation**: Uses `twitch.OAuthService.RefreshToken()` which receives credentials from centralized config (no `os.Getenv` in service code):
   ```go
-  func refreshTwitchToken(refreshToken string) (string, error) {
+  // Credentials are injected at startup from config.Config
+  func (s *OAuthService) RefreshToken(refreshToken string) (*TokenResponse, error) {
       resp, err := http.PostForm("https://id.twitch.tv/oauth2/token", url.Values{
-          "client_id":     {os.Getenv("TWITCH_CLIENT_ID")},
-          "client_secret": {os.Getenv("TWITCH_CLIENT_SECRET")},
+          "client_id":     {s.ClientID},
+          "client_secret": {s.ClientSecret},
           "grant_type":    {"refresh_token"},
           "refresh_token": {refreshToken},
       })
@@ -405,25 +426,58 @@ func CheckGuildPermission(userID, guildID string) (bool, error) {
 
 ### CSRF Protection
 - **State Parameter**: Random string stored in session, verified on callback
-- **SameSite Cookie**: Prevents CSRF attacks
+- **SameSite Cookie**: SameSite=Strict prevents CSRF attacks
+- **No CORS Wildcard**: Explicit origin validation (no * in production)
 
 ### XSS Protection
 - **HTTP-only Cookies**: JWT not accessible via JavaScript
 - **Content Security Policy**: Restrict inline scripts
+- **Template Validation**: User-provided templates validated for XSS attempts
+- **Input Sanitization**: All user inputs sanitized before processing
 
-### Token Storage
-- **Never store tokens in localStorage**: Use HTTP-only cookies
-- **Encrypt sensitive tokens**: Twitch access/refresh tokens (future: AWS KMS)
+### Token Storage & Encryption (Task 007)
+- **Never store tokens in localStorage**: Use HTTP-only cookies for sessions
+- **OAuth Token Encryption**: All Twitch access/refresh tokens encrypted at rest using AWS KMS
+- **Encryption Algorithm**: AES-256 via AWS KMS
+- **Key Management**: KMS keys rotated annually, access controlled via IAM
+- **Encryption Process**:
+  1. Token encrypted using KMS before database storage
+  2. Encrypted token stored as base64 string
+  3. Token decrypted on retrieval using KMS
+  4. Plaintext token kept in memory only when needed
+- **Migration**: Existing plaintext tokens encrypted via migration script
 
-### Rate Limiting
+### Configuration & Secrets Management (Task 007 + Config Refactor)
+- **Centralized Config**: All configuration loaded once at startup via `internal/config/config.go`
+  - Production: secrets from AWS Secrets Manager, non-secrets from Lambda env vars
+  - Development: all values from `.env` file (loaded via `loadEnvFile()`)
+  - Zero `os.Getenv()` calls in services, handlers, or middleware
+  - All services receive configuration via dependency injection from `main.go`
+- **AWS Secrets Manager**: All secrets stored in Secrets Manager in production
+- **Secrets Cached**: 5-minute TTL cache for performance
+- **Automatic Rotation**: Secrets rotated every 90 days
+- **Secrets Stored**:
+  - JWT signing secret
+  - Discord OAuth client ID and secret
+  - Twitch OAuth client ID and secret
+  - Twitch webhook secret
+- **IAM Access Control**: Lambda role has least-privilege access to secrets
+
+### Rate Limiting (Task 007)
 - **Discord API**: 10,000 requests per 10 minutes (per bot)
 - **Twitch API**: ~800 requests per minute (per client)
-- **Mitigation**: Cache user guilds, avoid redundant API calls
+- **Application Rate Limits**:
+  - Per-user: 50 requests/minute
+  - Global: 1000 requests/second
+  - Webhooks: 100 requests/second
+- **Mitigation**: Token bucket algorithm, in-memory rate limiter with cleanup
 
 ### Secret Rotation
-- **JWT Secret**: Rotate every 90 days (invalidates all sessions)
-- **Webhook Secret**: Rotate every 90 days (update EventSub subscriptions)
-- **OAuth Secrets**: Rotate when compromised
+- **JWT Secret**: Rotate every 90 days (invalidates all active sessions)
+- **Webhook Secret**: Rotate every 90 days (requires EventSub subscription updates)
+- **OAuth Secrets**: Rotate every 90 days or immediately when compromised
+- **KMS Keys**: Rotate annually via AWS KMS automatic rotation
+- **Rotation Process**: Blue-green rotation with cache invalidation
 
 ---
 

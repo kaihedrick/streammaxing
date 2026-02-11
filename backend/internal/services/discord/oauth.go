@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 )
 
 // OAuthService handles Discord OAuth 2.0 flows
@@ -16,17 +15,11 @@ type OAuthService struct {
 	RedirectURI  string
 }
 
-// NewOAuthService creates a new Discord OAuth service
-func NewOAuthService() *OAuthService {
-	redirectURI := os.Getenv("DISCORD_REDIRECT_URI")
-	if redirectURI == "" {
-		// Fallback to constructing from API_BASE_URL
-		redirectURI = os.Getenv("API_BASE_URL") + "/api/auth/discord/callback"
-	}
-
+// NewOAuthService creates a new Discord OAuth service with the given credentials.
+func NewOAuthService(clientID, clientSecret, redirectURI string) *OAuthService {
 	return &OAuthService{
-		ClientID:     os.Getenv("DISCORD_CLIENT_ID"),
-		ClientSecret: os.Getenv("DISCORD_CLIENT_SECRET"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		RedirectURI:  redirectURI,
 	}
 }

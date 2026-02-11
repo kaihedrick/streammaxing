@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 )
 
 // OAuthService handles Twitch OAuth 2.0 flows
@@ -16,12 +15,12 @@ type OAuthService struct {
 	RedirectURI  string
 }
 
-// NewOAuthService creates a new Twitch OAuth service
-func NewOAuthService() *OAuthService {
+// NewOAuthService creates a new Twitch OAuth service with the given credentials.
+func NewOAuthService(clientID, clientSecret, apiBaseURL string) *OAuthService {
 	return &OAuthService{
-		ClientID:     os.Getenv("TWITCH_CLIENT_ID"),
-		ClientSecret: os.Getenv("TWITCH_CLIENT_SECRET"),
-		RedirectURI:  os.Getenv("API_BASE_URL") + "/api/auth/twitch/callback",
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURI:  apiBaseURL + "/api/auth/twitch/callback",
 	}
 }
 

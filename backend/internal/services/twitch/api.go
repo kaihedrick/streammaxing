@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 )
@@ -21,11 +20,11 @@ type APIClient struct {
 	httpClient     *http.Client
 }
 
-// NewAPIClient creates a new Twitch API client
-func NewAPIClient() *APIClient {
+// NewAPIClient creates a new Twitch API client with the given credentials.
+func NewAPIClient(clientID, clientSecret string) *APIClient {
 	return &APIClient{
-		ClientID:     os.Getenv("TWITCH_CLIENT_ID"),
-		ClientSecret: os.Getenv("TWITCH_CLIENT_SECRET"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }

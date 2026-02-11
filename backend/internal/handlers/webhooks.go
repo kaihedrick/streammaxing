@@ -6,19 +6,22 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/yourusername/streammaxing/internal/services/logging"
 	"github.com/yourusername/streammaxing/internal/services/notifications"
 	"github.com/yourusername/streammaxing/internal/services/twitch"
 )
 
 // WebhookHandler handles incoming webhook events
 type WebhookHandler struct {
-	FanoutService *notifications.FanoutService
+	FanoutService  *notifications.FanoutService
+	securityLogger *logging.SecurityLogger
 }
 
 // NewWebhookHandler creates a new webhook handler
-func NewWebhookHandler(fanoutService *notifications.FanoutService) *WebhookHandler {
+func NewWebhookHandler(fanoutService *notifications.FanoutService, securityLogger *logging.SecurityLogger) *WebhookHandler {
 	return &WebhookHandler{
-		FanoutService: fanoutService,
+		FanoutService:  fanoutService,
+		securityLogger: securityLogger,
 	}
 }
 
@@ -40,6 +43,9 @@ type WebhookSubscription struct {
 
 // HandleTwitchWebhook processes incoming Twitch EventSub webhook events
 func (h *WebhookHandler) HandleTwitchWebhook(w http.ResponseWriter, r *http.Request) {
+	// Limit request body size to prevent abuse
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB max
+
 	// Read body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -54,7 +60,11 @@ func (h *WebhookHandler) HandleTwitchWebhook(w http.ResponseWriter, r *http.Requ
 	signature := r.Header.Get("Twitch-Eventsub-Message-Signature")
 
 	if !twitch.VerifyWebhookSignature(messageID, timestamp, signature, body) {
-		log.Printf("[WEBHOOK_ERROR] Invalid signature for message %s", messageID)
+		log.Printf("[WEBHOOK_ERROR] Invalid signature for message %s from %s", messageID, r.RemoteAddr)
+		// SECURITY: Log webhook signature failures
+		if h.securityLogger != nil {
+			h.securityLogger.LogWebhookSignatureFailure(r.Context(), r.RemoteAddr)
+		}
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
 		return
 	}

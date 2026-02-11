@@ -6,24 +6,36 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/yourusername/streammaxing/internal/db"
 	"github.com/yourusername/streammaxing/internal/middleware"
+	"github.com/yourusername/streammaxing/internal/services/auth"
+	"github.com/yourusername/streammaxing/internal/services/authorization"
 	"github.com/yourusername/streammaxing/internal/services/discord"
+	"github.com/yourusername/streammaxing/internal/services/logging"
 )
 
 // AuthHandler handles authentication routes
 type AuthHandler struct {
-	oauth *discord.OAuthService
+	oauth          *discord.OAuthService
+	sessionService *auth.SessionService
+	guildAuth      *authorization.GuildAuthService
+	securityLogger *logging.SecurityLogger
 }
 
-// NewAuthHandler creates a new auth handler
-func NewAuthHandler() *AuthHandler {
+// NewAuthHandler creates a new auth handler.
+// All dependencies are injected from the centralized config.
+func NewAuthHandler(
+	discordOAuth *discord.OAuthService,
+	sessionService *auth.SessionService,
+	guildAuth *authorization.GuildAuthService,
+	securityLogger *logging.SecurityLogger,
+) *AuthHandler {
 	return &AuthHandler{
-		oauth: discord.NewOAuthService(),
+		oauth:          discordOAuth,
+		sessionService: sessionService,
+		guildAuth:      guildAuth,
+		securityLogger: securityLogger,
 	}
 }
 
@@ -34,27 +46,19 @@ func generateState() string {
 	return hex.EncodeToString(b)
 }
 
-// generateJWT creates a JWT token for a user session
-func generateJWT(userID, username string) (string, error) {
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return "", jwt.ErrSignatureInvalid
-	}
+// Package-level config set once at startup via SetHandlerConfig.
+var handlerFrontendURL string
+var handlerIsProduction bool
 
-	claims := jwt.MapClaims{
-		"user_id":  userID,
-		"username": username,
-		"iat":      time.Now().Unix(),
-		"exp":      time.Now().Add(7 * 24 * time.Hour).Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+// SetHandlerConfig sets shared configuration for all handlers.
+// Must be called before any handler is used.
+func SetHandlerConfig(frontendURL string, isProduction bool) {
+	handlerFrontendURL = frontendURL
+	handlerIsProduction = isProduction
 }
 
-// isProduction returns true if running in production environment
 func isProduction() bool {
-	return os.Getenv("ENVIRONMENT") == "production"
+	return handlerIsProduction
 }
 
 // getCookieDomain returns the appropriate cookie domain for the current environment.
@@ -65,6 +69,23 @@ func getCookieDomain() string {
 		return "" // Omit Domain attr → scoped to the CloudFront/custom domain automatically
 	}
 	return "localhost"
+}
+
+// setSessionCookie creates a hardened session cookie.
+func setSessionCookie(w http.ResponseWriter, token string) {
+	cookie := &http.Cookie{
+		Name:     "session",
+		Value:    token,
+		Path:     "/",
+		MaxAge:   86400, // 24 hours (reduced from 7 days)
+		HttpOnly: true,
+		Secure:   isProduction(),
+		SameSite: http.SameSiteStrictMode, // Upgraded from Lax to Strict for better CSRF protection
+	}
+	if domain := getCookieDomain(); domain != "" {
+		cookie.Domain = domain
+	}
+	http.SetCookie(w, cookie)
 }
 
 // DiscordLogin initiates the Discord OAuth flow
@@ -100,11 +121,13 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 	queryState := r.URL.Query().Get("state")
 	if err != nil {
 		log.Printf("[AUTH_ERROR] Missing oauth_state cookie (did you start from /api/auth/discord/login?). URL state=%s, cookie error=%v", queryState, err)
+		h.securityLogger.LogAuthFailure(ctx, "", r.RemoteAddr, "missing_oauth_state_cookie")
 		http.Error(w, "Invalid state parameter - please start login from the beginning", http.StatusBadRequest)
 		return
 	}
 	if stateCookie.Value != queryState {
 		log.Printf("[AUTH_ERROR] State mismatch: cookie=%s, url=%s", stateCookie.Value, queryState)
+		h.securityLogger.LogAuthFailure(ctx, "", r.RemoteAddr, "oauth_state_mismatch")
 		http.Error(w, "Invalid state parameter - state mismatch", http.StatusBadRequest)
 		return
 	}
@@ -112,8 +135,7 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 	// Check for OAuth error
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		log.Printf("[AUTH_ERROR] Discord OAuth error: %s", errParam)
-		frontendURL := os.Getenv("FRONTEND_URL")
-		http.Redirect(w, r, frontendURL+"/?error=auth_denied", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, handlerFrontendURL+"/?error=auth_denied", http.StatusTemporaryRedirect)
 		return
 	}
 
@@ -201,30 +223,16 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Generate JWT session token
-	jwtToken, err := generateJWT(user.ID, user.Username)
+	// Generate JWT session token with JTI for revocation support
+	jwtToken, jti, err := h.sessionService.CreateSession(user.ID, user.Username)
 	if err != nil {
 		log.Printf("[AUTH_ERROR] Failed to generate JWT: %v", err)
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
 
-	// Set session cookie
-	// Dev: Domain "localhost" shares cookie across ports (8080 → 5173)
-	// Prod: Empty Domain → scoped to the host that set it (CloudFront domain)
-	sessionCookie := &http.Cookie{
-		Name:     "session",
-		Value:    jwtToken,
-		Path:     "/",
-		MaxAge:   7 * 24 * 60 * 60, // 7 days
-		HttpOnly: true,
-		Secure:   isProduction(),
-		SameSite: http.SameSiteLaxMode,
-	}
-	if domain := getCookieDomain(); domain != "" {
-		sessionCookie.Domain = domain
-	}
-	http.SetCookie(w, sessionCookie)
+	// Set hardened session cookie (24h, Strict SameSite)
+	setSessionCookie(w, jwtToken)
 
 	// Clear state cookie
 	http.SetCookie(w, &http.Cookie{
@@ -234,15 +242,34 @@ func (h *AuthHandler) DiscordCallback(w http.ResponseWriter, r *http.Request) {
 		MaxAge: -1,
 	})
 
-	log.Printf("[AUTH] User %s (%s) logged in", user.Username, user.ID)
+	log.Printf("[AUTH] User %s (%s) logged in (jti: %s)", user.Username, user.ID, jti)
+	h.securityLogger.LogAuthSuccess(ctx, user.ID, r.RemoteAddr)
 
 	// Redirect to frontend dashboard
-	frontendURL := os.Getenv("FRONTEND_URL")
-	http.Redirect(w, r, frontendURL+"/dashboard", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, handlerFrontendURL+"/dashboard", http.StatusTemporaryRedirect)
 }
 
-// Logout clears the session cookie
+// Logout clears the session cookie and revokes the session server-side
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := middleware.GetUserID(r)
+	jti := middleware.GetJTI(r)
+
+	// Revoke the session server-side so the JWT cannot be replayed
+	if jti != "" {
+		if err := h.sessionService.RevokeSession(ctx, jti); err != nil {
+			log.Printf("[AUTH_WARN] Failed to revoke session: %v", err)
+		} else {
+			h.securityLogger.LogSessionRevoked(ctx, userID, jti)
+		}
+	}
+
+	// Invalidate guild permission cache for this user
+	if h.guildAuth != nil {
+		h.guildAuth.InvalidateUser(userID)
+	}
+
+	// Clear the session cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    "",
@@ -250,7 +277,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   isProduction(),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

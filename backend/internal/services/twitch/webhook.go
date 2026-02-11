@@ -4,9 +4,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"time"
 )
+
+// webhookSecret is the shared secret used for webhook signature verification.
+// Set via SetWebhookSecret at startup rather than reading from env vars.
+var webhookSecret string
+
+// SetWebhookSecret configures the webhook secret used for signature verification.
+// Must be called before handling any webhooks.
+func SetWebhookSecret(secret string) {
+	webhookSecret = secret
+}
 
 // VerifyWebhookSignature verifies the HMAC-SHA256 signature of a Twitch webhook request
 func VerifyWebhookSignature(messageID, timestamp, signature string, body []byte) bool {
@@ -19,14 +28,13 @@ func VerifyWebhookSignature(messageID, timestamp, signature string, body []byte)
 		return false
 	}
 
-	secret := os.Getenv("TWITCH_WEBHOOK_SECRET")
-	if secret == "" {
+	if webhookSecret == "" {
 		return false
 	}
 
 	message := messageID + timestamp + string(body)
 
-	h := hmac.New(sha256.New, []byte(secret))
+	h := hmac.New(sha256.New, []byte(webhookSecret))
 	h.Write([]byte(message))
 	computed := "sha256=" + hex.EncodeToString(h.Sum(nil))
 

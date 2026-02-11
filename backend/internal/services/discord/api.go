@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
@@ -18,10 +17,10 @@ type APIClient struct {
 	httpClient *http.Client
 }
 
-// NewAPIClient creates a new Discord API client
-func NewAPIClient() *APIClient {
+// NewAPIClient creates a new Discord API client with the given bot token.
+func NewAPIClient(botToken string) *APIClient {
 	return &APIClient{
-		BotToken:   os.Getenv("DISCORD_BOT_TOKEN"),
+		BotToken:   botToken,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }

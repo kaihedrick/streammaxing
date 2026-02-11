@@ -15,10 +15,11 @@ type CleanupHandler struct {
 	eventsubService *twitch.EventSubService
 }
 
-// NewCleanupHandler creates a new cleanup handler
-func NewCleanupHandler(twitchAPIClient *twitch.APIClient) *CleanupHandler {
+// NewCleanupHandler creates a new cleanup handler.
+// The EventSub service is injected from the centralized config.
+func NewCleanupHandler(eventsubService *twitch.EventSubService) *CleanupHandler {
 	return &CleanupHandler{
-		eventsubService: twitch.NewEventSubService(twitchAPIClient),
+		eventsubService: eventsubService,
 	}
 }
 

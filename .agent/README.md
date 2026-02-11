@@ -19,6 +19,7 @@ StreamMaxing v3 is a serverless Twitch → Discord notification system that send
 - **Auth**: Discord OAuth + Twitch OAuth
 - **Events**: Twitch EventSub webhooks
 - **Notifications**: Discord Bot API
+- **Config**: Centralized config package (`internal/config/`) — all secrets loaded from AWS Secrets Manager (prod) or env vars (dev); no `os.Getenv` scattered across services
 
 ### Cost Target
 Less than $20/month for multi-server support with reasonable usage (10-50 streamers, 5-10 servers).
@@ -46,6 +47,7 @@ PRD and implementation plans for each feature.
 4. **[004-notification-fanout.md](Tasks/004-notification-fanout.md)** - Notification delivery with user preferences
 5. **[005-admin-dashboard.md](Tasks/005-admin-dashboard.md)** - Admin UI and user settings
 6. **[006-hardening-and-cleanup.md](Tasks/006-hardening-and-cleanup.md)** - Edge cases and cleanup logic
+7. **[007-security-hardening.md](Tasks/007-security-hardening.md)** - Security hardening and production readiness (IMPLEMENTED)
 
 ### Standard Operating Procedures
 Best practices for common development tasks.
@@ -56,6 +58,7 @@ Best practices for common development tasks.
 4. **[handle-webhooks.md](SOP/handle-webhooks.md)** - How to handle webhook events
 5. **[local-development.md](SOP/local-development.md)** - Local development setup guide
 6. **[deployment.md](SOP/deployment.md)** - Deployment procedures for AWS infrastructure
+7. **[security-best-practices.md](SOP/security-best-practices.md)** - Security guidelines and best practices
 
 ---
 

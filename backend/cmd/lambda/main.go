@@ -11,11 +11,17 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/yourusername/streammaxing/internal/config"
 	"github.com/yourusername/streammaxing/internal/db"
 	"github.com/yourusername/streammaxing/internal/handlers"
 	"github.com/yourusername/streammaxing/internal/middleware"
+	"github.com/yourusername/streammaxing/internal/services/auth"
+	"github.com/yourusername/streammaxing/internal/services/authorization"
 	"github.com/yourusername/streammaxing/internal/services/discord"
+	"github.com/yourusername/streammaxing/internal/services/encryption"
+	"github.com/yourusername/streammaxing/internal/services/logging"
 	"github.com/yourusername/streammaxing/internal/services/notifications"
+	"github.com/yourusername/streammaxing/internal/services/secrets"
 	"github.com/yourusername/streammaxing/internal/services/twitch"
 )
 
@@ -92,115 +98,216 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 	return params, true
 }
 
-// setupRoutes configures all API routes
-func setupRoutes(router *Router) {
-	// Initialize services
-	twitchAPIClient := twitch.NewAPIClient()
-	discordAPIClient := discord.NewAPIClient()
+// appServices holds all initialized services for the application.
+type appServices struct {
+	cfg               *config.Config
+	encryptionSvc     *encryption.Service
+	sessionSvc        *auth.SessionService
+	guildAuth         *authorization.GuildAuthService
+	securityLogger    *logging.SecurityLogger
+	userRL            *middleware.RateLimiter
+	globalRL          *middleware.GlobalRateLimiter
+	webhookProtection *middleware.WebhookProtection
+	discordAPI        *discord.APIClient
+	discordOAuth      *discord.OAuthService
+	twitchAPI         *twitch.APIClient
+	twitchOAuth       *twitch.OAuthService
+	twitchEventSub    *twitch.EventSubService
+	fanoutService     *notifications.FanoutService
+}
+
+// initServices loads configuration and initializes all services.
+func initServices() *appServices {
+	// Load centralized configuration (Secrets Manager in prod, env vars in dev)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("[CONFIG_ERROR] Failed to load config: %v", err)
+		cfg = &config.Config{} // empty config, services will fail gracefully
+	}
+
+	// Encryption service (KMS in production, dev fallback locally)
+	encryptionSvc, err := encryption.NewService(cfg.KMSKeyID)
+	if err != nil {
+		log.Printf("[SECURITY_WARN] Failed to init encryption service: %v", err)
+	}
+
+	// Secrets manager (for session service)
+	secretsMgr, err := secrets.NewManager()
+	if err != nil {
+		log.Printf("[SECURITY_WARN] Failed to init secrets manager: %v", err)
+	}
+
+	// Security logger
+	securityLogger := logging.NewSecurityLogger()
+
+	// Session service with revocation support
+	sessionDB := db.NewSessionDB()
+	var sessionSvc *auth.SessionService
+	if secretsMgr != nil {
+		sessionSvc = auth.NewSessionService(secretsMgr, sessionDB)
+	}
+
+	// Guild authorization service with 5-minute cache TTL
+	guildAuth := authorization.NewGuildAuthService()
+
+	// Rate limiters
+	userRL := middleware.NewRateLimiter(50, 100)
+	globalRL := middleware.NewGlobalRateLimiter(1000, 2000)
+	webhookProtection := middleware.NewWebhookProtection()
+
+	// Wire up middleware and handlers with config (no more os.Getenv in any service)
+	if sessionSvc != nil {
+		middleware.SetSessionService(sessionSvc)
+	}
+	middleware.SetSecurityLogger(securityLogger)
+	middleware.SetLegacyJWTSecret(cfg.JWTSecret)
+	middleware.SetCORSConfig(cfg.FrontendURL, cfg.IsProduction())
+	handlers.SetHandlerConfig(cfg.FrontendURL, cfg.IsProduction())
+
+	// Set webhook secret from config
+	twitch.SetWebhookSecret(cfg.TwitchWebhookSecret)
+
+	// Initialize API clients from config (no more os.Getenv in services)
+	discordAPIClient := discord.NewAPIClient(cfg.DiscordBotToken)
+	discordOAuthSvc := discord.NewOAuthService(cfg.DiscordClientID, cfg.DiscordClientSecret, cfg.DiscordRedirectURI)
+	twitchAPIClient := twitch.NewAPIClient(cfg.TwitchClientID, cfg.TwitchClientSecret)
+	twitchOAuthSvc := twitch.NewOAuthService(cfg.TwitchClientID, cfg.TwitchClientSecret, cfg.APIBaseURL)
+	twitchEventSubSvc := twitch.NewEventSubService(twitchAPIClient, cfg.APIBaseURL, cfg.TwitchWebhookSecret)
 	fanoutService := notifications.NewFanoutService(twitchAPIClient, discordAPIClient)
 
-	// Initialize handlers
-	authHandler := handlers.NewAuthHandler()
-	guildHandler := handlers.NewGuildHandler()
-	twitchAuthHandler := handlers.NewTwitchAuthHandler(twitchAPIClient)
-	webhookHandler := handlers.NewWebhookHandler(fanoutService)
+	return &appServices{
+		cfg:               cfg,
+		encryptionSvc:     encryptionSvc,
+		sessionSvc:        sessionSvc,
+		guildAuth:         guildAuth,
+		securityLogger:    securityLogger,
+		userRL:            userRL,
+		globalRL:          globalRL,
+		webhookProtection: webhookProtection,
+		discordAPI:        discordAPIClient,
+		discordOAuth:      discordOAuthSvc,
+		twitchAPI:         twitchAPIClient,
+		twitchOAuth:       twitchOAuthSvc,
+		twitchEventSub:    twitchEventSubSvc,
+		fanoutService:     fanoutService,
+	}
+}
+
+// setupRoutes configures all API routes
+func setupRoutes(router *Router, svc *appServices) {
+	// Initialize handlers — all services come from the centralized config,
+	// no more os.Getenv inside constructors.
+	authHandler := handlers.NewAuthHandler(svc.discordOAuth, svc.sessionSvc, svc.guildAuth, svc.securityLogger)
+	guildHandler := handlers.NewGuildHandler(svc.discordAPI, svc.discordOAuth, svc.guildAuth, svc.securityLogger)
+	twitchAuthHandler := handlers.NewTwitchAuthHandler(svc.twitchOAuth, svc.twitchEventSub, svc.encryptionSvc, svc.securityLogger)
+	webhookHandler := handlers.NewWebhookHandler(svc.fanoutService, svc.securityLogger)
 	preferencesHandler := handlers.NewPreferencesHandler()
-	inviteHandler := handlers.NewInviteHandler()
+	inviteHandler := handlers.NewInviteHandler(svc.guildAuth, svc.securityLogger)
+
+	// Helper: wrap handler with rate limiting
+	withRateLimit := func(h http.HandlerFunc) http.HandlerFunc {
+		return svc.globalRL.Middleware(svc.userRL.UserRateLimitMiddleware(h))
+	}
+
+	// Helper: wrap handler with auth + rate limiting
+	withAuth := func(h http.HandlerFunc) http.HandlerFunc {
+		return withRateLimit(middleware.AuthMiddleware(h))
+	}
 
 	// ==================
-	// Public routes
+	// Public routes (rate limited, no auth)
 	// ==================
 
 	// Health check
-	router.Handle("GET", "/api/health", healthHandler)
+	router.Handle("GET", "/api/health", withRateLimit(healthHandler))
 
 	// Discord OAuth (no auth required)
-	router.Handle("GET", "/api/auth/discord/login", authHandler.DiscordLogin)
-	router.Handle("GET", "/api/auth/discord/callback", authHandler.DiscordCallback)
+	router.Handle("GET", "/api/auth/discord/login", withRateLimit(authHandler.DiscordLogin))
+	router.Handle("GET", "/api/auth/discord/callback", withRateLimit(authHandler.DiscordCallback))
 
-	// Twitch OAuth callback (auth required - user must be logged in)
-	router.Handle("GET", "/api/auth/twitch/callback", middleware.AuthMiddleware(twitchAuthHandler.TwitchCallback))
+	// Twitch OAuth callback (no auth middleware - user_id is embedded in the OAuth state parameter)
+	router.Handle("GET", "/api/auth/twitch/callback", withRateLimit(twitchAuthHandler.TwitchCallback))
 
-	// Webhook endpoint (signature verification, no JWT auth)
-	router.Handle("POST", "/webhooks/twitch", webhookHandler.HandleTwitchWebhook)
+	// Webhook endpoint (signature verification, rate limited, idempotency check, no JWT auth)
+	router.Handle("POST", "/webhooks/twitch", svc.webhookProtection.Middleware(webhookHandler.HandleTwitchWebhook))
 
 	// ==================
-	// Authenticated routes
+	// Authenticated routes (rate limited + auth required)
 	// ==================
 
 	// Auth
-	router.Handle("POST", "/api/auth/logout", middleware.AuthMiddleware(authHandler.Logout))
-	router.Handle("GET", "/api/auth/me", middleware.AuthMiddleware(authHandler.GetMe))
+	router.Handle("POST", "/api/auth/logout", withAuth(authHandler.Logout))
+	router.Handle("GET", "/api/auth/me", withAuth(authHandler.GetMe))
 
 	// Guilds
-	router.Handle("GET", "/api/guilds", middleware.AuthMiddleware(guildHandler.GetUserGuilds))
+	router.Handle("GET", "/api/guilds", withAuth(guildHandler.GetUserGuilds))
 
-	router.Handle("GET", "/api/guilds/:guild_id/channels", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/channels", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetGuildChannels(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/roles", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/roles", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetGuildRoles(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/streamers", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/streamers", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetGuildStreamers(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("DELETE", "/api/guilds/:guild_id/streamers/:streamer_id", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("DELETE", "/api/guilds/:guild_id/streamers/:streamer_id", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.UnlinkStreamer(w, r, getPathParam(r, "guild_id"), getPathParam(r, "streamer_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/streamers/link", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/streamers/link", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		twitchAuthHandler.InitiateStreamerLink(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/config", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/config", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetGuildConfig(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("PUT", "/api/guilds/:guild_id/config", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("PUT", "/api/guilds/:guild_id/config", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.UpdateGuildConfig(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/bot-install-url", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/bot-install-url", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetBotInstallURL(w, r, getPathParam(r, "guild_id"))
 	}))
 
 	// Streamer message (custom notification text)
-	router.Handle("GET", "/api/guilds/:guild_id/streamers/:streamer_id/message", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/streamers/:streamer_id/message", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.GetStreamerMessage(w, r, getPathParam(r, "guild_id"), getPathParam(r, "streamer_id"))
 	}))
 
-	router.Handle("PUT", "/api/guilds/:guild_id/streamers/:streamer_id/message", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("PUT", "/api/guilds/:guild_id/streamers/:streamer_id/message", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		guildHandler.UpdateStreamerMessage(w, r, getPathParam(r, "guild_id"), getPathParam(r, "streamer_id"))
 	}))
 
 	// Invite links (admin)
-	router.Handle("POST", "/api/guilds/:guild_id/invites", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("POST", "/api/guilds/:guild_id/invites", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		inviteHandler.CreateInvite(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("GET", "/api/guilds/:guild_id/invites", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/guilds/:guild_id/invites", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		inviteHandler.ListInvites(w, r, getPathParam(r, "guild_id"))
 	}))
 
-	router.Handle("DELETE", "/api/guilds/:guild_id/invites/:invite_id", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("DELETE", "/api/guilds/:guild_id/invites/:invite_id", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		inviteHandler.DeleteInvite(w, r, getPathParam(r, "guild_id"), getPathParam(r, "invite_id"))
 	}))
 
 	// Invite links (public / any user)
-	router.Handle("GET", "/api/invites/:code", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("GET", "/api/invites/:code", withRateLimit(func(w http.ResponseWriter, r *http.Request) {
 		inviteHandler.GetInviteInfo(w, r, getPathParam(r, "code"))
-	})
-	router.Handle("POST", "/api/invites/:code/accept", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	}))
+	router.Handle("POST", "/api/invites/:code/accept", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		inviteHandler.AcceptInvite(w, r, getPathParam(r, "code"))
 	}))
 
 	// User preferences
-	router.Handle("GET", "/api/users/me/preferences", middleware.AuthMiddleware(preferencesHandler.GetUserPreferences))
+	router.Handle("GET", "/api/users/me/preferences", withAuth(preferencesHandler.GetUserPreferences))
 
-	router.Handle("PUT", "/api/users/me/preferences/:guild_id/:streamer_id", middleware.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("PUT", "/api/users/me/preferences/:guild_id/:streamer_id", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		preferencesHandler.UpdateUserPreference(w, r, getPathParam(r, "guild_id"), getPathParam(r, "streamer_id"))
 	}))
 }
@@ -218,9 +325,12 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // Handler is the Lambda function handler (API Gateway HTTP API v2 payload format)
 func Handler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	// Load centralized config and initialize all services
+	svc := initServices()
+
 	// Initialize database connection (if not already connected)
 	if db.Pool == nil {
-		if err := db.Connect(); err != nil {
+		if err := db.Connect(svc.cfg.DatabaseURL); err != nil {
 			log.Printf("Failed to connect to database: %v", err)
 			return events.APIGatewayV2HTTPResponse{
 				StatusCode: http.StatusInternalServerError,
@@ -231,7 +341,7 @@ func Handler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (event
 
 	// Create router
 	router := NewRouter()
-	setupRoutes(router)
+	setupRoutes(router, svc)
 
 	// Debug: log raw request info for auth callbacks
 	if strings.Contains(request.RawPath, "callback") {
@@ -317,10 +427,10 @@ func convertAPIGatewayV2Request(req events.APIGatewayV2HTTPRequest) (*http.Reque
 // IMPORTANT: Header() returns a reference to the persistent headers map
 // so that w.Header().Set(...) and http.SetCookie() work correctly.
 type responseWriter struct {
-	statusCode    int
-	headers       http.Header
-	body          *bytes.Buffer
-	wroteHeader   bool
+	statusCode  int
+	headers     http.Header
+	body        *bytes.Buffer
+	wroteHeader bool
 }
 
 func newResponseWriter() *responseWriter {
@@ -360,8 +470,12 @@ func main() {
 		// Load .env file for local development
 		loadEnvFile()
 
+		// Load centralized config and initialize all services
+		svc := initServices()
+		log.Println("Configuration loaded and services initialized")
+
 		// Initialize database
-		if err := db.Connect(); err != nil {
+		if err := db.Connect(svc.cfg.DatabaseURL); err != nil {
 			log.Printf("Warning: Failed to connect to database: %v", err)
 			log.Println("Running without database connection - some features will not work")
 		} else {
@@ -370,7 +484,7 @@ func main() {
 		}
 
 		router := NewRouter()
-		setupRoutes(router)
+		setupRoutes(router, svc)
 
 		handler := middleware.CORSMiddleware(middleware.LoggingMiddleware(router.ServeHTTP))
 

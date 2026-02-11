@@ -6,18 +6,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 )
 
 // EventSubService manages Twitch EventSub subscriptions
 type EventSubService struct {
-	apiClient *APIClient
+	apiClient     *APIClient
+	apiBaseURL    string
+	webhookSecret string
 }
 
-// NewEventSubService creates a new EventSub service
-func NewEventSubService(apiClient *APIClient) *EventSubService {
+// NewEventSubService creates a new EventSub service with the given configuration.
+func NewEventSubService(apiClient *APIClient, apiBaseURL, webhookSecret string) *EventSubService {
 	return &EventSubService{
-		apiClient: apiClient,
+		apiClient:     apiClient,
+		apiBaseURL:    apiBaseURL,
+		webhookSecret: webhookSecret,
 	}
 }
 
@@ -54,8 +57,7 @@ func (s *EventSubService) CreateStreamOnlineSubscription(broadcasterID string) (
 		return nil, err
 	}
 
-	webhookURL := os.Getenv("API_BASE_URL") + "/webhooks/twitch"
-	webhookSecret := os.Getenv("TWITCH_WEBHOOK_SECRET")
+	webhookURL := s.apiBaseURL + "/webhooks/twitch"
 
 	reqBody := CreateSubscriptionRequest{
 		Type:    "stream.online",
@@ -66,7 +68,7 @@ func (s *EventSubService) CreateStreamOnlineSubscription(broadcasterID string) (
 		Transport: Transport{
 			Method:   "webhook",
 			Callback: webhookURL,
-			Secret:   webhookSecret,
+			Secret:   s.webhookSecret,
 		},
 	}
 

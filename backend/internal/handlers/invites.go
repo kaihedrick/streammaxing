@@ -8,14 +8,28 @@ import (
 
 	"github.com/yourusername/streammaxing/internal/db"
 	"github.com/yourusername/streammaxing/internal/middleware"
+	"github.com/yourusername/streammaxing/internal/services/authorization"
+	"github.com/yourusername/streammaxing/internal/services/logging"
+	"github.com/yourusername/streammaxing/internal/validation"
 )
 
 // InviteHandler handles invite link operations
-type InviteHandler struct{}
+type InviteHandler struct {
+	guildAuth      *authorization.GuildAuthService
+	securityLogger *logging.SecurityLogger
+	validator      *validation.Validator
+}
 
 // NewInviteHandler creates a new invite handler
-func NewInviteHandler() *InviteHandler {
-	return &InviteHandler{}
+func NewInviteHandler(
+	guildAuth *authorization.GuildAuthService,
+	securityLogger *logging.SecurityLogger,
+) *InviteHandler {
+	return &InviteHandler{
+		guildAuth:      guildAuth,
+		securityLogger: securityLogger,
+		validator:      validation.NewValidator(),
+	}
 }
 
 // CreateInvite creates a new invite link for a guild (admin only)
@@ -26,12 +40,22 @@ func (h *InviteHandler) CreateInvite(w http.ResponseWriter, r *http.Request, gui
 		return
 	}
 
-	// Verify user is admin
-	isAdmin, err := db.IsUserGuildAdmin(r.Context(), userID, guildID)
+	// Validate guild ID
+	if err := h.validator.ValidateGuildID(guildID); err != nil {
+		http.Error(w, "Invalid guild ID", http.StatusBadRequest)
+		return
+	}
+
+	// Verify admin with real-time check
+	isAdmin, err := h.guildAuth.CheckGuildAdmin(r.Context(), userID, guildID)
 	if err != nil || !isAdmin {
+		h.securityLogger.LogPermissionDenied(r.Context(), userID, guildID, "create_invite")
 		http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
 		return
 	}
+
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 
 	var body struct {
 		ExpiresInHours int `json:"expires_in_hours"` // 0 = never
@@ -69,8 +93,16 @@ func (h *InviteHandler) ListInvites(w http.ResponseWriter, r *http.Request, guil
 		return
 	}
 
-	isAdmin, err := db.IsUserGuildAdmin(r.Context(), userID, guildID)
+	// Validate guild ID
+	if err := h.validator.ValidateGuildID(guildID); err != nil {
+		http.Error(w, "Invalid guild ID", http.StatusBadRequest)
+		return
+	}
+
+	// Verify admin with real-time check
+	isAdmin, err := h.guildAuth.CheckGuildAdmin(r.Context(), userID, guildID)
 	if err != nil || !isAdmin {
+		h.securityLogger.LogPermissionDenied(r.Context(), userID, guildID, "list_invites")
 		http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
 		return
 	}
@@ -98,8 +130,16 @@ func (h *InviteHandler) DeleteInvite(w http.ResponseWriter, r *http.Request, gui
 		return
 	}
 
-	isAdmin, err := db.IsUserGuildAdmin(r.Context(), userID, guildID)
+	// Validate guild ID
+	if err := h.validator.ValidateGuildID(guildID); err != nil {
+		http.Error(w, "Invalid guild ID", http.StatusBadRequest)
+		return
+	}
+
+	// Verify admin with real-time check
+	isAdmin, err := h.guildAuth.CheckGuildAdmin(r.Context(), userID, guildID)
 	if err != nil || !isAdmin {
+		h.securityLogger.LogPermissionDenied(r.Context(), userID, guildID, "delete_invite")
 		http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
 		return
 	}
@@ -118,6 +158,12 @@ func (h *InviteHandler) DeleteInvite(w http.ResponseWriter, r *http.Request, gui
 
 // GetInviteInfo returns public info about an invite (no auth required)
 func (h *InviteHandler) GetInviteInfo(w http.ResponseWriter, r *http.Request, code string) {
+	// Validate invite code format
+	if err := h.validator.ValidateInviteCode(code); err != nil {
+		http.Error(w, "Invalid invite code", http.StatusBadRequest)
+		return
+	}
+
 	link, err := db.GetInviteLink(r.Context(), code)
 	if err != nil {
 		http.Error(w, "Invite not found", http.StatusNotFound)
@@ -158,6 +204,12 @@ func (h *InviteHandler) AcceptInvite(w http.ResponseWriter, r *http.Request, cod
 	userID := middleware.GetUserID(r)
 	if userID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate invite code format
+	if err := h.validator.ValidateInviteCode(code); err != nil {
+		http.Error(w, "Invalid invite code", http.StatusBadRequest)
 		return
 	}
 

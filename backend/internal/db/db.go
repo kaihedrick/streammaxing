@@ -3,18 +3,16 @@ package db
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var Pool *pgxpool.Pool
 
-// Connect establishes a connection pool to the database
-func Connect() error {
-	databaseURL := os.Getenv("DATABASE_URL")
+// Connect establishes a connection pool to the database using the given URL.
+func Connect(databaseURL string) error {
 	if databaseURL == "" {
-		return fmt.Errorf("DATABASE_URL environment variable not set")
+		return fmt.Errorf("database URL is empty")
 	}
 
 	config, err := pgxpool.ParseConfig(databaseURL)
