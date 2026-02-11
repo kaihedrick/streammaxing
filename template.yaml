@@ -57,6 +57,10 @@ Resources:
     Properties:
       StageName: '$default'
       # No CORS config here – our Go middleware handles CORS
+      # API Gateway throttling – first line of defence before Lambda rate limiters
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5000
+        ThrottlingRateLimit: 1000
 
   StreamMaxingFunction:
     Type: AWS::Serverless::Function

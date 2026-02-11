@@ -79,6 +79,7 @@ func (h *InviteHandler) CreateInvite(w http.ResponseWriter, r *http.Request, gui
 	}
 
 	log.Printf("[INVITE] Created invite %s for guild %s by %s", link.Code, guildID, userID)
+	db.InsertAuditLog(r.Context(), userID, "create_invite", "invite", link.Code, map[string]interface{}{"guild_id": guildID}, r.RemoteAddr, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -151,6 +152,7 @@ func (h *InviteHandler) DeleteInvite(w http.ResponseWriter, r *http.Request, gui
 	}
 
 	log.Printf("[INVITE] Deleted invite %s from guild %s by %s", inviteID, guildID, userID)
+	db.InsertAuditLog(r.Context(), userID, "delete_invite", "invite", inviteID, map[string]interface{}{"guild_id": guildID}, r.RemoteAddr, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Invite deleted"})

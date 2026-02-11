@@ -67,7 +67,27 @@ func Load() (*Config, error) {
 		cfg.loadFromEnvVars()
 	}
 
+	// Validate JWT secret strength
+	if err := cfg.validateJWTSecret(); err != nil {
+		if cfg.IsProduction() {
+			return nil, fmt.Errorf("JWT secret validation failed: %w", err)
+		}
+		log.Printf("[CONFIG_WARN] %v (non-production, continuing anyway)", err)
+	}
+
 	return cfg, nil
+}
+
+// validateJWTSecret checks that the JWT secret meets minimum security requirements.
+// A 256-bit (32-byte) secret is required for HS256 signing.
+func (c *Config) validateJWTSecret() error {
+	if c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is empty — authentication will not work")
+	}
+	if len(c.JWTSecret) < 32 {
+		return fmt.Errorf("JWT_SECRET is only %d bytes; minimum 32 bytes (256-bit) required for secure HS256 signing. Generate one with: openssl rand -base64 32", len(c.JWTSecret))
+	}
+	return nil
 }
 
 // loadFromSecretsManager loads secrets from AWS Secrets Manager.

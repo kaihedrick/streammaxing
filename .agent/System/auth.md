@@ -22,6 +22,9 @@ StreamMaxing uses OAuth 2.0 for both Discord and Twitch authentication. Discord 
 - **Scopes**: `identify guilds`
 - **Permissions**: None needed for OAuth (bot permissions separate)
 
+### Frontend Auth Redirect
+When a user navigates to `/` (the login page), the `LoginPage` component calls `useAuth()` to check for an existing session. If the user is already authenticated, they are automatically redirected to `/dashboard` via `<Navigate to="/dashboard" replace />`. Otherwise, the login UI is shown.
+
 ### Authorization Flow
 
 ```
@@ -447,6 +450,13 @@ func CheckGuildPermission(userID, guildID string) (bool, error) {
   4. Plaintext token kept in memory only when needed
 - **Migration**: Existing plaintext tokens encrypted via migration script
 
+### JWT Secret Strength Requirements
+- **Minimum 32 bytes (256-bit)** required for HS256 signing
+- In production, `config.Load()` returns an error if the secret is shorter than 32 bytes
+- In development, a warning is logged but the app continues
+- Generate a strong secret: `openssl rand -base64 32`
+- Do not reuse the same secret across environments (dev/staging/prod)
+
 ### Configuration & Secrets Management (Task 007 + Config Refactor)
 - **Centralized Config**: All configuration loaded once at startup via `internal/config/config.go`
   - Production: secrets from AWS Secrets Manager, non-secrets from Lambda env vars
@@ -462,15 +472,35 @@ func CheckGuildPermission(userID, guildID string) (bool, error) {
   - Twitch OAuth client ID and secret
   - Twitch webhook secret
 - **IAM Access Control**: Lambda role has least-privilege access to secrets
+- **No ENCRYPTION_KEY env var**: Token encryption uses AWS KMS (`KMS_KEY_ID`), not a local key. If future features need a local encryption key, it must be at least 32 bytes and rotatable.
 
 ### Rate Limiting (Task 007)
 - **Discord API**: 10,000 requests per 10 minutes (per bot)
 - **Twitch API**: ~800 requests per minute (per client)
-- **Application Rate Limits**:
+- **API Gateway Throttling** (infra-level, in `template.yaml`):
+  - Rate limit: 1000 requests/second
+  - Burst limit: 5000 requests
+- **Application Rate Limits** (in-Lambda, per cold start):
   - Per-user: 50 requests/minute
   - Global: 1000 requests/second
   - Webhooks: 100 requests/second
 - **Mitigation**: Token bucket algorithm, in-memory rate limiter with cleanup
+- **Future**: AWS WAF with per-IP rate-based rules can be added to CloudFront for stronger DDoS protection
+
+### Security Headers
+All API responses include the following headers (via `middleware/security_headers.go`):
+- `X-Content-Type-Options: nosniff` -- prevents MIME-sniffing
+- `X-Frame-Options: DENY` -- prevents clickjacking
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
+
+### Audit Logging
+Sensitive operations are logged to the `audit_log` database table (`db/audit.go`):
+- **Config changes**: `update_config` on `guild_config`
+- **Streamer management**: `link_streamer`, `unlink_streamer`, `update_streamer_message`
+- **Invite management**: `create_invite`, `delete_invite`
+- Each entry records: user ID, action, resource type/ID, details JSON, IP address, success flag, timestamp
+- Audit writes are fire-and-forget (errors logged but do not block the request)
 
 ### Secret Rotation
 - **JWT Secret**: Rotate every 90 days (invalidates all active sessions)

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // User queries
@@ -286,6 +288,31 @@ func LogNotification(ctx context.Context, guildID, streamerID, eventID string) e
 	`
 	_, err := Pool.Exec(ctx, query, guildID, streamerID, eventID)
 	return err
+}
+
+// TryClaimNotification atomically claims the right to send a notification.
+// Returns true if we inserted a new row (we should send), false if another
+// Lambda instance already claimed it (skip sending).
+// This eliminates the TOCTOU race between CheckNotificationSent and LogNotification
+// that caused duplicate Discord messages.
+func TryClaimNotification(ctx context.Context, guildID, streamerID, eventID string) (bool, error) {
+	query := `
+		INSERT INTO notification_log (guild_id, streamer_id, event_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (guild_id, event_id) DO NOTHING
+		RETURNING id
+	`
+	var id string
+	err := Pool.QueryRow(ctx, query, guildID, streamerID, eventID).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Conflict: another instance already claimed this notification
+			return false, nil
+		}
+		return false, err
+	}
+	// We inserted: we own this notification
+	return true, nil
 }
 
 // EventSub subscription queries

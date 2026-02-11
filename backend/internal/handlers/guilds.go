@@ -224,6 +224,7 @@ func (h *GuildHandler) UpdateStreamerMessage(w http.ResponseWriter, r *http.Requ
 	}
 
 	log.Printf("[GUILD] Updated custom content: guild=%s streamer=%s by=%s", guildID, streamerID, userID)
+	db.InsertAuditLog(r.Context(), userID, "update_streamer_message", "streamer", streamerID, map[string]interface{}{"guild_id": guildID}, r.RemoteAddr, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Message updated"})
@@ -253,6 +254,7 @@ func (h *GuildHandler) UnlinkStreamer(w http.ResponseWriter, r *http.Request, gu
 	}
 
 	log.Printf("[GUILD] Unlinked streamer %s from guild %s by user %s", streamerID, guildID, userID)
+	db.InsertAuditLog(r.Context(), userID, "unlink_streamer", "streamer", streamerID, map[string]interface{}{"guild_id": guildID}, r.RemoteAddr, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Streamer unlinked"})
@@ -335,6 +337,7 @@ func (h *GuildHandler) UpdateGuildConfig(w http.ResponseWriter, r *http.Request,
 	}
 
 	log.Printf("[GUILD] Updated config for guild %s by user %s", guildID, userID)
+	db.InsertAuditLog(r.Context(), userID, "update_config", "guild_config", guildID, nil, r.RemoteAddr, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Configuration updated"})

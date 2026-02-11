@@ -89,13 +89,16 @@ func (s *FanoutService) sendNotificationToGuild(
 	streamData *twitchSvc.StreamData,
 	eventID string,
 ) error {
-	// Check idempotency (prevent duplicate notifications)
-	isDuplicate, err := db.CheckNotificationSent(ctx, guildID, eventID)
+	// Atomically claim the right to send this notification.
+	// The UNIQUE(guild_id, event_id) constraint ensures only one Lambda instance
+	// can win the insert; all others get a conflict and skip sending.
+	// This eliminates the TOCTOU race that caused duplicate Discord messages.
+	claimed, err := db.TryClaimNotification(ctx, guildID, streamer.ID, eventID)
 	if err != nil {
-		return fmt.Errorf("idempotency check failed: %w", err)
+		return fmt.Errorf("notification claim failed: %w", err)
 	}
-	if isDuplicate {
-		log.Printf("[NOTIF_SKIP] Duplicate: guild=%s event=%s", guildID, eventID)
+	if !claimed {
+		log.Printf("[NOTIF_SKIP] Duplicate (already claimed): guild=%s event=%s", guildID, eventID)
 		return nil
 	}
 
@@ -131,12 +134,6 @@ func (s *FanoutService) sendNotificationToGuild(
 	// Send Discord message
 	if err := s.DiscordAPI.SendMessage(config.ChannelID, message); err != nil {
 		return fmt.Errorf("discord send failed: %w", err)
-	}
-
-	// Log notification (idempotency)
-	if err := db.LogNotification(ctx, guildID, streamer.ID, eventID); err != nil {
-		log.Printf("[NOTIF_WARN] Failed to log notification: %v", err)
-		// Non-fatal error
 	}
 
 	log.Printf("[NOTIF_SENT] Guild=%s Channel=%s Event=%s", guildID, config.ChannelID, eventID)

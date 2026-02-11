@@ -362,8 +362,8 @@ func Handler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (event
 	// Create response writer
 	rw := newResponseWriter()
 
-	// Apply CORS middleware
-	handler := middleware.CORSMiddleware(router.ServeHTTP)
+	// Apply middleware chain: security headers → CORS → router
+	handler := middleware.SecurityHeadersMiddleware(middleware.CORSMiddleware(router.ServeHTTP))
 
 	// Serve request
 	handler(rw, httpReq)

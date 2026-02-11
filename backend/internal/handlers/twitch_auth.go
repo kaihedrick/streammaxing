@@ -217,6 +217,10 @@ func (h *TwitchAuthHandler) TwitchCallback(w http.ResponseWriter, r *http.Reques
 	})
 
 	log.Printf("[TWITCH_AUTH] Linked streamer %s (%s) to guild %s", user.DisplayName, user.ID, guildID)
+	db.InsertAuditLog(ctx, userID, "link_streamer", "streamer", user.ID, map[string]interface{}{
+		"guild_id":     guildID,
+		"twitch_login": user.Login,
+	}, r.RemoteAddr, true)
 
 	// Redirect to frontend dashboard
 	http.Redirect(w, r, fmt.Sprintf("%s/dashboard/guilds/%s", handlerFrontendURL, guildID), http.StatusTemporaryRedirect)

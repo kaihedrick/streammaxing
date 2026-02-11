@@ -1,6 +1,19 @@
+import { Navigate } from 'react-router-dom';
 import { loginWithDiscord } from '../../services/api';
+import { useAuth } from '../../hooks/useAuth';
+import { LoadingSpinner } from '../common/LoadingSpinner';
 
 export function LoginPage() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   return (
     <div className="login-page">
       <div className="login-container">
