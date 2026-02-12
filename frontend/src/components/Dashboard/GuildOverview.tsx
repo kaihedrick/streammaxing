@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   getGuildStreamers,
   initiateStreamerLink,
@@ -18,6 +18,7 @@ import { useAuth } from '../../hooks/useAuth';
 
 export function GuildOverview() {
   const { guildId } = useParams<{ guildId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [guild, setGuild] = useState<Guild | null>(null);
   const [streamers, setStreamers] = useState<Streamer[]>([]);
@@ -26,8 +27,32 @@ export function GuildOverview() {
   const [adding, setAdding] = useState(false);
   const [installingBot, setInstallingBot] = useState(false);
   const [editingStreamerId, setEditingStreamerId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ message: string; type: 'info' | 'error' } | null>(null);
 
   const isAdmin = guild?.is_admin ?? false;
+
+  // Check for notices/errors from redirects
+  useEffect(() => {
+    const noticeParam = searchParams.get('notice');
+    const errorParam = searchParams.get('error');
+    let handled = false;
+
+    if (noticeParam === 'already_linked') {
+      const streamerName = searchParams.get('streamer') || 'This streamer';
+      setNotice({ message: `${streamerName} is already linked to this server.`, type: 'info' });
+      handled = true;
+    } else if (errorParam === 'twitch_auth_denied') {
+      setNotice({ message: 'Twitch authorization failed or was denied. Please try again.', type: 'error' });
+      handled = true;
+    }
+
+    if (handled) {
+      // Clean all query params from the URL
+      setSearchParams({}, { replace: true });
+      // Auto-dismiss after 6 seconds
+      setTimeout(() => setNotice(null), 6000);
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (guildId) {
@@ -119,10 +144,15 @@ export function GuildOverview() {
     }
   };
 
-  const copyInviteLink = (code: string) => {
-    const url = `${window.location.origin}/invite/${code}`;
-    navigator.clipboard.writeText(url);
-  };
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyInviteLink = useCallback((invite: InviteLink) => {
+    const url = `${window.location.origin}/invite/${invite.code}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(invite.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  }, []);
 
   if (loading) return <LoadingSpinner />;
 
@@ -147,13 +177,22 @@ export function GuildOverview() {
         )}
       </div>
 
-      {/* Bot Install - admin only */}
-      {isAdmin && (
+      {/* Notice / error banner */}
+      {notice && (
+        <div className={`notice-banner ${notice.type === 'error' ? 'notice-error' : ''}`}>
+          <span>{notice.message}</span>
+          <button className="notice-dismiss" onClick={() => setNotice(null)}>&times;</button>
+        </div>
+      )}
+
+      {/* Bot Install hint - only show for admins when no streamers are set up yet.
+          If streamers exist, the bot is clearly working; no need to show this. */}
+      {isAdmin && streamers.length === 0 && (
         <div className="bot-install-section">
           <div className="bot-install-card">
             <div className="bot-install-info">
-              <h3>Bot Installation</h3>
-              <p>The bot must be added to your Discord server to send notifications and fetch channels/roles.</p>
+              <h3>Getting Started</h3>
+              <p>If you haven't already, add the StreamMaxing bot to your server, then use "+ Add Streamer" above to link a Twitch channel.</p>
             </div>
             <button onClick={handleInstallBot} className="btn btn-secondary" disabled={installingBot}>
               {installingBot ? 'Loading...' : 'Add Bot to Server'}
@@ -226,13 +265,24 @@ export function GuildOverview() {
             <div className="invite-list">
               {invites.map((invite) => (
                 <div key={invite.id} className="invite-item">
-                  <span
-                    className="invite-item-code"
-                    onClick={() => copyInviteLink(invite.code)}
-                    title="Click to copy full link"
+                  <code className="invite-item-code">{window.location.origin}/invite/{invite.code}</code>
+                  <button
+                    className="btn-icon copy-btn"
+                    onClick={() => copyInviteLink(invite)}
+                    title="Copy invite link"
                   >
-                    {window.location.origin}/invite/{invite.code}
-                  </span>
+                    {copiedId === invite.id ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    )}
+                    <span className="copy-label">{copiedId === invite.id ? 'Copied!' : 'Copy'}</span>
+                  </button>
                   <span className="invite-item-meta">
                     {invite.use_count} uses
                     {invite.max_uses > 0 && ` / ${invite.max_uses} max`}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { exchangeDiscordCode } from '../../services/api';
 import { LoadingSpinner } from '../common/LoadingSpinner';
@@ -19,8 +19,14 @@ export function AuthCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  // Guard: ensure the exchange logic only runs once, even if React re-fires
+  // the effect (StrictMode, dependency-reference changes, etc.).
+  const processed = useRef(false);
 
   useEffect(() => {
+    if (processed.current) return;
+    processed.current = true;
+
     const code = searchParams.get('code');
     const state = searchParams.get('state');
     const oauthError = searchParams.get('error');

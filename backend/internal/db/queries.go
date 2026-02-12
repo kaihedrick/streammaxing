@@ -222,15 +222,19 @@ func GetGuildStreamers(ctx context.Context, guildID string) ([]Streamer, error) 
 	return streamers, rows.Err()
 }
 
-// LinkStreamerToGuild links a streamer to a guild
-func LinkStreamerToGuild(ctx context.Context, guildID, streamerID, addedBy string) error {
+// LinkStreamerToGuild links a streamer to a guild.
+// Returns (true, nil) if a new link was created, (false, nil) if the link already existed.
+func LinkStreamerToGuild(ctx context.Context, guildID, streamerID, addedBy string) (bool, error) {
 	query := `
 		INSERT INTO guild_streamers (guild_id, streamer_id, added_by)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (guild_id, streamer_id) DO NOTHING
 	`
-	_, err := Pool.Exec(ctx, query, guildID, streamerID, addedBy)
-	return err
+	result, err := Pool.Exec(ctx, query, guildID, streamerID, addedBy)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
 }
 
 // UnlinkStreamerFromGuild removes a streamer from a guild

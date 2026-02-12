@@ -588,6 +588,45 @@ a:hover {
   }
 }
 
+/* Notice Banner */
+.notice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #3b3520;
+  border: 1px solid #d4a017;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #ffd54f;
+  font-size: 0.9rem;
+}
+
+.notice-dismiss {
+  background: none;
+  border: none;
+  color: #ffd54f;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.notice-dismiss:hover {
+  opacity: 1;
+}
+
+.notice-banner.notice-error {
+  background: #3b2020;
+  border-color: #d44040;
+  color: #ff6b6b;
+}
+
+.notice-banner.notice-error .notice-dismiss {
+  color: #ff6b6b;
+}
+
 /* Bot Install Section */
 .bot-install-section {
   margin-bottom: 24px;
@@ -770,15 +809,50 @@ a:hover {
 }
 
 .invite-item-code {
-  font-family: monospace;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   color: #7289da;
   font-weight: 600;
+  font-size: 0.82rem;
+  background: #2f3136;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.btn-icon.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid #40444b;
+  border-radius: 4px;
+  color: #b9bbbe;
+  padding: 4px 10px;
   cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-icon.copy-btn:hover {
+  background: #40444b;
+  color: #fff;
+  border-color: #5865f2;
+}
+
+.btn-icon.copy-btn .copy-label {
+  pointer-events: none;
 }
 
 .invite-item-meta {
   color: #72767d;
   font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 /* Streamer Message Editor */

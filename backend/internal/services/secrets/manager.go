@@ -87,15 +87,20 @@ func NewManager() (*Manager, error) {
 }
 
 // GetJWTSecret returns the JWT signing secret.
+// Priority: JWT_SECRET env var (always available via SAM template) → Secrets Manager.
 func (m *Manager) GetJWTSecret() (string, error) {
-	if m.isDev {
-		secret := os.Getenv("JWT_SECRET")
-		if secret == "" {
-			return "", fmt.Errorf("JWT_SECRET environment variable not set")
-		}
+	// The JWT secret is injected as an env var by the SAM template in all
+	// environments.  Prefer the env var so we don't require Secrets Manager
+	// IAM permissions just for this secret.
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		return secret, nil
 	}
 
+	if m.isDev {
+		return "", fmt.Errorf("JWT_SECRET environment variable not set")
+	}
+
+	// Fallback: try AWS Secrets Manager (requires IAM permissions + the secret to exist)
 	var s JWTSecret
 	raw, err := m.getSecret("streammaxing/jwt-secret")
 	if err != nil {
